@@ -21,6 +21,7 @@
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Analysis/VectorUtils.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
@@ -108,6 +109,7 @@ private:
   bool foldExtractedCmps(Instruction &I);
   bool foldSingleElementStore(Instruction &I);
   bool scalarizeLoadExtract(Instruction &I);
+  bool foldZExtShuf(Instruction &I);
   bool foldShuffleOfBinops(Instruction &I);
   bool foldShuffleFromReductions(Instruction &I);
   bool foldSelectShuffle(Instruction &I, bool FromReduction = false);
@@ -1213,6 +1215,39 @@ bool VectorCombine::scalarizeLoadExtract(Instruction &I) {
   return true;
 }
 
+// If this is a zext of shuffle, try to fold zero insertion into the shuffle
+bool VectorCombine::foldZExtShuf(Instruction &I) {
+  Value *V;
+  ArrayRef<int> Mask;
+  if (!match(&I,
+             m_ZExt(m_OneUse(m_Shuffle(m_Value(V), m_Undef(), m_Mask(Mask))))))
+    return false;
+
+  auto *VTy = cast<FixedVectorType>(V->getType());
+  ZExtInst *ZE = cast<ZExtInst>(&I);
+  FixedVectorType *SrcTy = cast<FixedVectorType>(ZE->getSrcTy()),
+                  *DstTy = cast<FixedVectorType>(ZE->getDestTy());
+  IntegerType *SrcElemTy = cast<IntegerType>(SrcTy->getElementType()),
+              *DstElemTy = cast<IntegerType>(DstTy->getElementType());
+
+  SmallVector<int> NewMask;
+  unsigned ExtendedElems = DstElemTy->getBitWidth() / SrcElemTy->getBitWidth();
+  bool IsBigEndian = I.getModule()->getDataLayout().isBigEndian();
+  unsigned ElemPos = IsBigEndian ? ExtendedElems - 1 : 0;
+  unsigned ZeroIdx = VTy->getNumElements();
+  for (unsigned I = 0; I < Mask.size(); ++I) {
+    for (unsigned J = 0; J < ExtendedElems; ++J) {
+      NewMask.push_back(ElemPos == J ? Mask[I] : ZeroIdx);
+    }
+  }
+
+  auto *Zeros = Constant::getNullValue(VTy);
+  Value *Shuf = Builder.CreateShuffleVector(V, Zeros, NewMask);
+  Value *Bitcast = Builder.CreateBitCast(Shuf, DstTy);
+  replaceValue(I, *Bitcast);
+  return true;
+}
+
 /// Try to convert "shuffle (binop), (binop)" with a shared binop operand into
 /// "binop (shuffle), (shuffle)".
 bool VectorCombine::foldShuffleOfBinops(Instruction &I) {
@@ -1728,6 +1763,9 @@ bool VectorCombine::run() {
         break;
       case Instruction::Load:
         MadeChange |= scalarizeLoadExtract(I);
+        break;
+      case Instruction::ZExt:
+        MadeChange |= foldZExtShuf(I);
         break;
       default:
         break;
