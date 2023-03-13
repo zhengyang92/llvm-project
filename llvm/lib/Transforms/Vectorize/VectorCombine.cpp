@@ -1241,9 +1241,22 @@ bool VectorCombine::foldZExtShuf(Instruction &I) {
     }
   }
 
-  auto *Zeros = Constant::getNullValue(VTy);
+  Value *Zeros = Constant::getNullValue(VTy);
   Value *Shuf = Builder.CreateShuffleVector(V, Zeros, NewMask);
   Value *Bitcast = Builder.CreateBitCast(Shuf, DstTy);
+
+  auto OldCost = TTI.getShuffleCost(TTI::SK_PermuteSingleSrc, SrcTy) +
+                 TTI.getCastInstrCost(Instruction::ZExt,
+                                      DstTy, SrcTy, TTI::CastContextHint::None);
+
+  VectorType *ShufTy = cast<VectorType>(Shuf->getType());
+
+  auto NewCost = TTI.getShuffleCost(TTI::SK_PermuteTwoSrc, ShufTy) +
+                 TTI.getCastInstrCost(Instruction::BitCast,
+                                      DstTy , ShufTy, TTI::CastContextHint::None);
+
+  if (OldCost <= NewCost)
+    return false;
   replaceValue(I, *Bitcast);
   return true;
 }
