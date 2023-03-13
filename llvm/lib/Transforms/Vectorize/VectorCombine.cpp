@@ -1245,15 +1245,18 @@ bool VectorCombine::foldZExtShuf(Instruction &I) {
   Value *Shuf = Builder.CreateShuffleVector(V, Zeros, NewMask);
   Value *Bitcast = Builder.CreateBitCast(Shuf, DstTy);
 
-  auto OldCost = TTI.getShuffleCost(TTI::SK_PermuteSingleSrc, SrcTy) +
+  TTI::TargetCostKind CostKind = TTI::TCK_RecipThroughput;
+  auto OldCost = TTI.getShuffleCost(TTI::SK_PermuteSingleSrc, SrcTy, CostKind) +
                  TTI.getCastInstrCost(Instruction::ZExt,
-                                      DstTy, SrcTy, TTI::CastContextHint::None);
+                                      DstTy, SrcTy, TTI::CastContextHint::None, CostKind);
 
   VectorType *ShufTy = cast<VectorType>(Shuf->getType());
 
-  auto NewCost = TTI.getShuffleCost(TTI::SK_PermuteTwoSrc, ShufTy) +
+  auto NewCost = TTI.getShuffleCost(TTI::SK_PermuteTwoSrc, ShufTy, CostKind) +
                  TTI.getCastInstrCost(Instruction::BitCast,
-                                      DstTy , ShufTy, TTI::CastContextHint::None);
+                                     DstTy , ShufTy, TTI::CastContextHint::None, CostKind);
+
+  llvm::errs()<<OldCost<<" "<<NewCost<<"\n";
 
   if (OldCost <= NewCost)
     return false;
