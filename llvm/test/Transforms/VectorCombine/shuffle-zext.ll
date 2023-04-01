@@ -1,6 +1,8 @@
 ; RUN: opt -S -passes=vector-combine -data-layout=e < %s | FileCheck %s --check-prefixes=SMALL,CHECK
 ; RUN: opt -S -passes=vector-combine -data-layout=E < %s | FileCheck %s --check-prefixes=BIG,CHECK
 
+target triple = "x86_64-unknown-linux-gnu"
+
 define <8 x i16> @ShufZ64i8Ext8i8to8i16(<64 x i8> %0) {
 ; CHECK-LABEL: @ShufZ64i8Ext8i8to8i16(
 ; SMALL-NEXT:    [[SHIFT:%.*]] = shufflevector <64 x i8> [[X:%.*]], <64 x i8> zeroinitializer, <16 x i32> <i32 2, i32 64, i32 10, i32 64, i32 18, i32 64, i32 26, i32 64, i32 34, i32 64, i32 42, i32 64, i32 50, i32 64, i32 58, i32 64>

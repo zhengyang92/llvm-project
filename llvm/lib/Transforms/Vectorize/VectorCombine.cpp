@@ -25,10 +25,12 @@
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/IntrinsicsX86.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/TargetParser/Triple.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Vectorize.h"
 #include <numeric>
@@ -1217,6 +1219,10 @@ bool VectorCombine::scalarizeLoadExtract(Instruction &I) {
 
 // If this is a zext of shuffle, try to fold zero insertion into the shuffle
 bool VectorCombine::foldZExtShuf(Instruction &I) {
+  Triple T(F.getParent()->getTargetTriple());
+  if (!T.isX86())
+    return false;
+
   Value *V;
   ArrayRef<int> Mask;
   if (!match(&I,
@@ -1242,24 +1248,8 @@ bool VectorCombine::foldZExtShuf(Instruction &I) {
   }
 
   Value *Zeros = Constant::getNullValue(VTy);
-  Value *Shuf = Builder.CreateShuffleVector(V, Zeros, NewMask);
+  Value *Shuf = Builder.CreateBinaryIntrinsic(Intrinsic::x86_avx512_pshuf_b_512, Zeros, NewMask);
   Value *Bitcast = Builder.CreateBitCast(Shuf, DstTy);
-
-  TTI::TargetCostKind CostKind = TTI::TCK_RecipThroughput;
-  auto OldCost = TTI.getShuffleCost(TTI::SK_PermuteSingleSrc, SrcTy, CostKind) +
-                 TTI.getCastInstrCost(Instruction::ZExt,
-                                      DstTy, SrcTy, TTI::CastContextHint::None, CostKind);
-
-  VectorType *ShufTy = cast<VectorType>(Shuf->getType());
-
-  auto NewCost = TTI.getShuffleCost(TTI::SK_PermuteTwoSrc, ShufTy, CostKind) +
-                 TTI.getCastInstrCost(Instruction::BitCast,
-                                     DstTy , ShufTy, TTI::CastContextHint::None, CostKind);
-
-  llvm::errs()<<OldCost<<" "<<NewCost<<"\n";
-
-  if (OldCost <= NewCost)
-    return false;
   replaceValue(I, *Bitcast);
   return true;
 }
