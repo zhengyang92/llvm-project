@@ -2713,6 +2713,57 @@ static Instruction *foldIdentityPaddedShuffles(ShuffleVectorInst &Shuf) {
   return new ShuffleVectorInst(X, Y, NewMask);
 }
 
+// fold double reverse
+static Instruction *foldDoubleReverse(ShuffleVectorInst &SVI,
+                                      InstCombiner::BuilderTy &Builder) {
+  if (!SVI.isReverse())
+    return nullptr;
+  ArrayRef<int> OuterMask = SVI.getShuffleMask();
+
+  Instruction *Arith;
+  if (!match(SVI.getOperand(0), m_OneUse(m_Instruction(Arith))))
+    return nullptr;
+
+  if (CmpInst *CI = dyn_cast<CmpInst>(Arith)) {
+    // fold (reverse (cmp (reverse x), y)) -> (cmp x, (reverse y)) or
+    //      (reverse (cmp y, (reverse x))) -> (cmp (reverse y), x)
+    Value *LHS = CI->getOperand(0), *RHS = CI->getOperand(1);
+    CmpInst::Predicate Pred = CI->getPredicate();
+
+    bool IsLHSReverse;
+    ShuffleVectorInst *RevX; // (reverse x)
+    Value *Y;
+    if (RevX = dyn_cast<ShuffleVectorInst>(LHS),
+        RevX && RevX->hasOneUse() && RevX->isReverse()) {
+      IsLHSReverse = true;
+      Y = RHS;
+    } else if (RevX = dyn_cast<ShuffleVectorInst>(RHS),
+               RevX && RevX->hasOneUse() && RevX->isReverse()) {
+      IsLHSReverse = false;
+      Y = LHS;
+    } else {
+      return nullptr;
+    }
+    Value *X = RevX->getOperand(0);
+
+    Value *RevY; // (reverse y)
+    Constant *Poisons = PoisonValue::get(RevX->getType());
+    if (Constant *C = dyn_cast<Constant>(Y)) {
+      RevY = ConstantExpr::getShuffleVector(C, Poisons, OuterMask);
+    } else {
+      RevY = Builder.CreateShuffleVector(Y, Poisons, OuterMask);
+    }
+
+    Value *V1 = IsLHSReverse ? X : RevY;
+    Value *V2 = IsLHSReverse ? RevY : X;
+
+    return CmpInst::Create(CI->getOpcode(), Pred, V1, V2);
+  }
+  // TODO: (reverse (unaryop (reverse x))) -> (unaryop x)
+  // TODO: (reverse (binop (reverse x), y)) -> (binop x, (reverse y))
+  return nullptr;
+}
+
 // Splatting the first element of the result of a BinOp, where any of the
 // BinOp's operands are the result of a first element splat can be simplified to
 // splatting the first element of the result of the BinOp
@@ -2839,6 +2890,9 @@ Instruction *InstCombinerImpl::visitShuffleVectorInst(ShuffleVectorInst &SVI) {
     return I;
 
   if (Instruction *I = foldCastShuffle(SVI, Builder))
+    return I;
+
+  if (Instruction *I = foldDoubleReverse(SVI, Builder))
     return I;
 
   APInt UndefElts(VWidth, 0);
