@@ -2726,18 +2726,18 @@ static Instruction *foldDoubleReverse(ShuffleVectorInst &SVI,
   if (CmpInst *CI = dyn_cast<CmpInst>(Arith)) {
     Value *LHS = CI->getOperand(0), *RHS = CI->getOperand(1);
 
-    bool ReverseLHS;
+    bool ReverseRHS;
     ShuffleVectorInst *RevX; // (reverse x)
     Value *Y;
-    if ((RevX = dyn_cast<ShuffleVectorInst>(LHS)) && RevX->hasOneUse() &&
-        RevX->isReverse()) {
+    if ((RevX = dyn_cast<ShuffleVectorInst>(LHS)) &&
+        RevX->hasOneUse() && RevX->isReverse()) {
       // fold (reverse (cmp (reverse x), y)) -> (cmp x, (reverse y))
-      ReverseLHS = false;
+      ReverseRHS = true;
       Y = RHS;
-    } else if ((RevX = dyn_cast<ShuffleVectorInst>(RHS)) && RevX->hasOneUse() &&
-               RevX->isReverse()) {
+    } else if ((RevX = dyn_cast<ShuffleVectorInst>(RHS)) &&
+               RevX->hasOneUse() && RevX->isReverse()) {
       // fold (reverse (cmp y, (reverse x))) -> (cmp (reverse y), x)
-      ReverseLHS = true;
+      ReverseRHS = false;
       Y = LHS;
     } else {
       return nullptr;
@@ -2746,8 +2746,8 @@ static Instruction *foldDoubleReverse(ShuffleVectorInst &SVI,
     Value *X = RevX->getOperand(0);
     Value *RevY = Builder.CreateVectorReverse(Y);
 
-    Value *V1 = ReverseLHS ? RevY : X;
-    Value *V2 = ReverseLHS ? X : RevY;
+    Value *V1 = ReverseRHS ? X : RevY;
+    Value *V2 = ReverseRHS ? RevY : X;
 
     return CmpInst::Create(CI->getOpcode(), CI->getPredicate(), V1, V2);
   }
