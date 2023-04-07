@@ -2729,13 +2729,13 @@ static Instruction *foldDoubleReverse(ShuffleVectorInst &SVI,
     bool ReverseLHS;
     ShuffleVectorInst *RevX; // (reverse x)
     Value *Y;
-    if ((RevX = dyn_cast<ShuffleVectorInst>(LHS)) &&
-        RevX->hasOneUse() && RevX->isReverse()) {
+    if ((RevX = dyn_cast<ShuffleVectorInst>(LHS)) && RevX->hasOneUse() &&
+        RevX->isReverse()) {
       // fold (reverse (cmp (reverse x), y)) -> (cmp x, (reverse y))
       ReverseLHS = false;
       Y = RHS;
-    } else if ((RevX = dyn_cast<ShuffleVectorInst>(RHS)) &&
-               RevX->hasOneUse() && RevX->isReverse()) {
+    } else if ((RevX = dyn_cast<ShuffleVectorInst>(RHS)) && RevX->hasOneUse() &&
+               RevX->isReverse()) {
       // fold (reverse (cmp y, (reverse x))) -> (cmp (reverse y), x)
       ReverseLHS = true;
       Y = LHS;
